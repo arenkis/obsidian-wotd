@@ -513,25 +513,51 @@ class WOTDSettingsTab extends PluginSettingTab {
         break;
     }
     
-    instructionsDiv.innerHTML = `
-      <ul>
-        <li>${apiInstructions}</li>
-        <li>Toggle languages on/off using the switches</li>
-        <li>Set appropriate difficulty levels for each language</li>
-        <li>Words will automatically be added to your daily notes</li>
-        <li>Use Command Palette: "Word of the Day: Fetch words for all languages"</li>
-      </ul>
-    `;
+    const instructionsList = instructionsDiv.createEl('ul');
+
+    const apiInstructionItem = instructionsList.createEl('li');
+    apiInstructionItem.appendText('Get your ');
+
+    if (this.plugin.settings.provider === 'claude') {
+      apiInstructionItem.appendText('Claude API key from ');
+      apiInstructionItem.createEl('a', {
+        text: 'Anthropic Console',
+        href: 'https://console.anthropic.com/'
+      });
+    } else if (this.plugin.settings.provider === 'openai') {
+      apiInstructionItem.appendText('OpenAI API key from ');
+      apiInstructionItem.createEl('a', {
+        text: 'OpenAI Platform',
+        href: 'https://platform.openai.com/api-keys'
+      });
+    } else if (this.plugin.settings.provider === 'gemini') {
+      apiInstructionItem.appendText('Gemini API key from ');
+      apiInstructionItem.createEl('a', {
+        text: 'Google AI Studio',
+        href: 'https://makersuite.google.com/app/apikey'
+      });
+    }
+
+    instructionsList.createEl('li', { text: 'Toggle languages on/off using the switches' });
+    instructionsList.createEl('li', { text: 'Set appropriate difficulty levels for each language' });
+    instructionsList.createEl('li', { text: 'Words will automatically be added to your daily notes' });
+    instructionsList.createEl('li', { text: 'Use Command Palette: "Word of the Day: Fetch words for all languages"' });
 
     // Model Information
     containerEl.createEl('h3', { text: 'Model Information' });
     const modelInfo = containerEl.createDiv('setting-item-description');
-    modelInfo.innerHTML = `
-      <ul>
-        <li><strong>Claude:</strong> Uses Claude 3 Haiku (fast & cost-effective)</li>
-        <li><strong>OpenAI:</strong> Uses GPT-3.5 Turbo (balanced performance)</li>
-        <li><strong>Gemini:</strong> Uses Gemini Pro (Google's latest model)</li>
-      </ul>
-    `;
+    const modelList = modelInfo.createEl('ul');
+
+    const claudeItem = modelList.createEl('li');
+    claudeItem.createEl('strong', { text: 'Claude:' });
+    claudeItem.appendText(' Uses Claude 3 Haiku (fast & cost-effective)');
+
+    const openaiItem = modelList.createEl('li');
+    openaiItem.createEl('strong', { text: 'OpenAI:' });
+    openaiItem.appendText(' Uses GPT-3.5 Turbo (balanced performance)');
+
+    const geminiItem = modelList.createEl('li');
+    geminiItem.createEl('strong', { text: 'Gemini:' });
+    geminiItem.appendText(' Uses Gemini Pro (Google\'s latest model)');
   }
 }
