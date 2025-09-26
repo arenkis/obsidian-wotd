@@ -5,6 +5,7 @@ const DEFAULT_SETTINGS = {
   claudeApiKey: '',
   openaiApiKey: '',
   geminiApiKey: '',
+  autoAppend: true,
   languages: [
     { name: 'English', difficulty: 'Fluent', enabled: true },
   ]
@@ -33,7 +34,7 @@ module.exports = class WOTDPlugin extends Plugin {
 
     // Auto-add to daily notes when created
     this.registerEvent(this.app.vault.on("create", async (file) => {
-      if (this.isDailyNoteFile(file)) {
+      if (this.settings.autoAppend && this.isDailyNoteFile(file)) {
         // Small delay to ensure file is ready
         setTimeout(async () => {
           const markdownText = await this.fetchAllWordsOfTheDay();
@@ -46,7 +47,7 @@ module.exports = class WOTDPlugin extends Plugin {
     
     // Also check when files are opened (for existing daily notes)
     this.registerEvent(this.app.workspace.on("file-open", async (file) => {
-      if (file && this.isDailyNoteFile(file)) {
+      if (this.settings.autoAppend && file && this.isDailyNoteFile(file)) {
         const content = await this.app.vault.read(file);
         // Check if words already exist
         if (!content.includes("> [!QUOTE] Vocabulary")) {
@@ -419,6 +420,18 @@ class WOTDSettingsTab extends PluginSettingTab {
           .inputEl.type = 'password'
         );
     }
+
+    // Auto-append Setting
+    new Setting(containerEl)
+      .setName('Auto-append to daily notes')
+      .setDesc('Automatically add words of the day to daily notes when they are created or opened')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.autoAppend)
+        .onChange(async (value) => {
+          this.plugin.settings.autoAppend = value;
+          await this.plugin.saveSettings();
+        })
+      );
 
     // Languages Section
     containerEl.createEl('h3', { text: 'Languages' });
