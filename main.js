@@ -13,7 +13,6 @@ const DEFAULT_SETTINGS = {
 
 module.exports = class WOTDPlugin extends Plugin {
   async onload() {
-    console.log('Loading Word of the Day Plugin');
     
     await this.loadSettings();
     
@@ -61,7 +60,6 @@ module.exports = class WOTDPlugin extends Plugin {
   }
 
   async onunload() {
-    console.log('Unloading Word of the Day Plugin');
   }
 
   async loadSettings() {
@@ -291,7 +289,6 @@ Make sure the words are interesting, useful, and appropriate for language learne
       
       // Avoid duplicate content
       if (content.includes("> [!QUOTE] Vocabulary")) {
-        console.log("Words of the Day already added to the daily note.");
         return;
       }
       
@@ -335,7 +332,6 @@ Make sure the words are interesting, useful, and appropriate for language learne
   isDailyNoteFile(file) {
     const dailyNotesConfig = this.app.internalPlugins.plugins["daily-notes"]?.instance?.options;
     if (!dailyNotesConfig) {
-      console.log("Daily Notes plugin is not enabled or misconfigured.");
       return false;
     }
 
@@ -361,11 +357,9 @@ class WOTDSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: 'Word of the Day Settings' });
-
     // AI Provider Selection
     new Setting(containerEl)
-      .setName('AI Provider')
+      .setName('AI provider')
       .setDesc('Select which AI service to use for generating words')
       .addDropdown(dropdown => dropdown
         .addOption('claude', 'Claude (Anthropic)')
@@ -382,7 +376,7 @@ class WOTDSettingsTab extends PluginSettingTab {
     // API Key Settings (show only the relevant one)
     if (this.plugin.settings.provider === 'claude') {
       new Setting(containerEl)
-        .setName('Claude API Key')
+        .setName('Claude API key')
         .setDesc('Enter your Anthropic Claude API key')
         .addText(text => text
           .setPlaceholder('sk-ant-...')
@@ -395,7 +389,7 @@ class WOTDSettingsTab extends PluginSettingTab {
         );
     } else if (this.plugin.settings.provider === 'openai') {
       new Setting(containerEl)
-        .setName('OpenAI API Key')
+        .setName('OpenAI API key')
         .setDesc('Enter your OpenAI API key')
         .addText(text => text
           .setPlaceholder('sk-...')
@@ -408,7 +402,7 @@ class WOTDSettingsTab extends PluginSettingTab {
         );
     } else if (this.plugin.settings.provider === 'gemini') {
       new Setting(containerEl)
-        .setName('Google Gemini API Key')
+        .setName('Google Gemini API key')
         .setDesc('Enter your Google Gemini API key')
         .addText(text => text
           .setPlaceholder('AIza...')
@@ -434,8 +428,8 @@ class WOTDSettingsTab extends PluginSettingTab {
       );
 
     // Languages Section
-    containerEl.createEl('h3', { text: 'Languages' });
-    containerEl.createEl('p', { 
+    new Setting(containerEl).setName('Languages').setHeading();
+    containerEl.createEl('p', {
       text: 'Configure the languages you want to learn. You can add, remove, and set difficulty levels.',
       cls: 'setting-item-description'
     });
@@ -474,7 +468,7 @@ class WOTDSettingsTab extends PluginSettingTab {
 
     // Add new language
     new Setting(containerEl)
-      .setName('Add Language')
+      .setName('Add language')
       .setDesc('Add a new language to learn')
       .addText(text => {
         text.setPlaceholder('Language name (e.g., French)');
@@ -510,7 +504,7 @@ class WOTDSettingsTab extends PluginSettingTab {
       );
 
     // Instructions
-    containerEl.createEl('h3', { text: 'Instructions' });
+    new Setting(containerEl).setName('Instructions').setHeading();
     const instructionsDiv = containerEl.createDiv('setting-item-description');
     
     let apiInstructions = '';
@@ -556,8 +550,8 @@ class WOTDSettingsTab extends PluginSettingTab {
     instructionsList.createEl('li', { text: 'Words will automatically be added to your daily notes' });
     instructionsList.createEl('li', { text: 'Use Command Palette: "Word of the Day: Fetch words for all languages"' });
 
-    // Model Information
-    containerEl.createEl('h3', { text: 'Model Information' });
+    // Model information
+    new Setting(containerEl).setName('Model information').setHeading();
     const modelInfo = containerEl.createDiv('setting-item-description');
     const modelList = modelInfo.createEl('ul');
 
