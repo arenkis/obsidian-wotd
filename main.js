@@ -1,13 +1,28 @@
-const { Plugin, Notice } = require('obsidian');
+const { Plugin, Notice, PluginSettingTab, Setting, requestUrl } = require('obsidian');
+
+const DEFAULT_SETTINGS = {
+  provider: 'claude',
+  claudeApiKey: '',
+  openaiApiKey: '',
+  geminiApiKey: '',
+  languages: [
+    { name: 'English', difficulty: 'Fluent', enabled: true },
+  ]
+};
 
 module.exports = class WOTDPlugin extends Plugin {
   async onload() {
     console.log('Loading Word of the Day Plugin');
+    
+    await this.loadSettings();
+    
+    // Add settings tab
+    this.addSettingTab(new WOTDSettingsTab(this.app, this));
 
-    // Add a command for fetching Words of the Day
+    // Add command for fetching Words of the Day
     this.addCommand({
-      id: 'fetch-wotd',
-      name: 'Fetch Words of the Day (English, Spanish, Portuguese)',
+      id: 'word-of-the-day-fetch',
+      name: 'Fetch words for all languages',
       callback: async () => {
         const markdownText = await this.fetchAllWordsOfTheDay();
         if (markdownText) {
@@ -16,149 +31,507 @@ module.exports = class WOTDPlugin extends Plugin {
       }
     });
 
+    // Auto-add to daily notes when created
     this.registerEvent(this.app.vault.on("create", async (file) => {
       if (this.isDailyNoteFile(file)) {
-        const markdownText = await this.fetchAllWordsOfTheDay();
-        if (markdownText) {
-          await this.appendToDailyNote(file, markdownText);
-        }
-      } else {
+        // Small delay to ensure file is ready
+        setTimeout(async () => {
+          const markdownText = await this.fetchAllWordsOfTheDay();
+          if (markdownText) {
+            await this.appendToDailyNote(file, markdownText);
+          }
+        }, 100);
       }
-    }));    
+    }));
+    
+    // Also check when files are opened (for existing daily notes)
+    this.registerEvent(this.app.workspace.on("file-open", async (file) => {
+      if (file && this.isDailyNoteFile(file)) {
+        const content = await this.app.vault.read(file);
+        // Check if words already exist
+        if (!content.includes("> [!QUOTE] Vocabulary")) {
+          const markdownText = await this.fetchAllWordsOfTheDay();
+          if (markdownText) {
+            await this.appendToDailyNote(file, markdownText);
+          }
+        }
+      }
+    }));
   }
 
   async onunload() {
     console.log('Unloading Word of the Day Plugin');
   }
 
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+
+  getActiveApiKey() {
+    switch(this.settings.provider) {
+      case 'claude':
+        return this.settings.claudeApiKey;
+      case 'openai':
+        return this.settings.openaiApiKey;
+      case 'gemini':
+        return this.settings.geminiApiKey;
+      default:
+        return null;
+    }
+  }
+
   async fetchAllWordsOfTheDay() {
-    const englishWotd = await this.fetchEnglishWordOfTheDay();
-    const spanishWotd = await this.fetchSpanishWordOfTheDay();
-    const portugueseWotd = await this.fetchPortugueseWordOfTheDay();
+    const apiKey = this.getActiveApiKey();
+    
+    if (!apiKey) {
+      new Notice(`Please configure your ${this.settings.provider} API key in settings`);
+      return null;
+    }
 
-    return `> [!QUOTE] Vocabulary
-  >  
-  > **English:**  
-  > ${this.formatWordOfTheDay(englishWotd)}  
-  >  
-  > **Spanish:**  
-  > ${this.formatWordOfTheDay(spanishWotd)}  
-  >  
-  > **Portuguese:**  
-  > ${this.formatWordOfTheDay(portugueseWotd)}`;
-  }
+    const enabledLanguages = this.settings.languages.filter(lang => lang.enabled);
+    
+    if (enabledLanguages.length === 0) {
+      new Notice('No languages enabled. Please configure in settings.');
+      return null;
+    }
 
-  // Helper function to ensure proper formatting
-  formatWordOfTheDay(wordData) {
-      if (typeof wordData === "string") {
-          return wordData.split("\n").map(line => `> ${line}`).join("\n");
+    try {
+      const words = await this.fetchWordsFromAI(enabledLanguages);
+      
+      if (!words || words.length === 0) {
+        return null;
       }
-      return `> ${wordData}`; // Fallback in case it's not a string
-  }
 
+      // Build the markdown
+      let markdown = `> [!QUOTE] Vocabulary\n> `;
+      
+      words.forEach((wordData, index) => {
+        markdown += `\n> **${wordData.language}:**\n`;
+        markdown += `> **${wordData.word}**\n> \n`;
+        markdown += `> *Definition:* ${wordData.definition}\n> \n`;
+        markdown += `> *Example:* ${wordData.example}`;
+        
+        if (index < words.length - 1) {
+          markdown += '\n> ';
+        }
+      });
 
-  // Fetch the English Word of the Day
-  async fetchEnglishWordOfTheDay() {
-    const proxyUrl = 'https://corsproxy.io/?url=';
-    const targetUrl = 'https://www.merriam-webster.com/word-of-the-day/';
-    const fullUrl = proxyUrl + encodeURIComponent(targetUrl);
-
-    try {
-      const response = await fetch(fullUrl);
-      const html = await response.text();
-
-      const wordMatch = html.match(/<span class="wotd-example-label">(.*?)<\/span>\s*in Context/);
-      const word = wordMatch ? wordMatch[1].trim() : 'No word found';
-
-      const definitionMatch = html.match(/<h2>What It Means<\/h2>\s*<p>(.*?)<\/p>/);
-      const definition = definitionMatch ? definitionMatch[1].replace(/<.*?>/g, '').trim() : 'No definition found';
-
-      return `**${word}**\n\n${definition}`;
+      return markdown;
     } catch (error) {
-      console.error('Error fetching English Word of the Day:', error);
-      return 'Error fetching English Word of the Day';
+      console.error('Error fetching words:', error);
+      new Notice('Error fetching words. Check console for details.');
+      return null;
     }
   }
 
-  // Fetch the Spanish Word of the Day from SpanishDict
-  async fetchSpanishWordOfTheDay() {
-    const proxyUrl = 'https://corsproxy.io/?key=7383fd1a&url=';
-    const targetUrl = 'https://www.lexisrex.com/Spanish/Daily-Word';
-    const fullUrl = proxyUrl + encodeURIComponent(targetUrl);
-
-    try {
-      const response = await fetch(fullUrl);
-      const html = await response.text();
-
-      const wordMatch = html.match(/<span style='color:blue;font-size:40px;font-family: "Times New Roman";'>(.*?)<\/span>/);
-      const word = wordMatch ? wordMatch[1].trim() : 'No word found';
-
-      const definitionMatch = html.match(/<font color='green' size='5' face='Times New Roman'>(.*?)<\/font>/);
-      const definition = definitionMatch ? definitionMatch[1].trim() : 'No definition found';
-
-      return `**${word}**\n\nTranslation: ${definition}`;
-    } catch (error) {
-      console.error('Error fetching Spanish Word of the Day:', error);
-      return 'Error fetching Spanish Word of the Day';
+  async fetchWordsFromAI(languages) {
+    switch(this.settings.provider) {
+      case 'claude':
+        return await this.fetchWordsFromClaude(languages);
+      case 'openai':
+        return await this.fetchWordsFromOpenAI(languages);
+      case 'gemini':
+        return await this.fetchWordsFromGemini(languages);
+      default:
+        throw new Error('Invalid AI provider selected');
     }
   }
 
-  // Fetch the Portuguese Word of the Day from LexisRex
-  async fetchPortugueseWordOfTheDay() {
-    const proxyUrl = 'https://corsproxy.io/?url=';
-    const targetUrl = 'https://www.lexisrex.com/Portuguese/Daily-Word';
-    const fullUrl = proxyUrl + encodeURIComponent(targetUrl);
-
+  async fetchWordsFromClaude(languages) {
+    const prompt = this.buildPrompt(languages);
+    
     try {
-      const response = await fetch(fullUrl);
-      const html = await response.text();
+      const response = await requestUrl({
+        url: 'https://api.anthropic.com/v1/messages',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.settings.claudeApiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-3-haiku-20240307',
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: prompt
+          }]
+        })
+      });
 
-      const wordMatch = html.match(/<span style='color:blue;font-size:40px;font-family: "Times New Roman";'>(.*?)<\/span>/);
-      const word = wordMatch ? wordMatch[1].trim() : 'No word found';
-
-      const definitionMatch = html.match(/<font color='green' size='5' face='Times New Roman'>(.*?)<\/font>/);
-      const definition = definitionMatch ? definitionMatch[1].trim() : 'No definition found';
-
-      return `**${word}**\n\nTranslation: ${definition}`;
+      const responseData = response.json;
+      const content = responseData.content[0].text;
+      
+      // Parse the JSON response
+      const words = JSON.parse(content);
+      return words;
     } catch (error) {
-      console.error('Error fetching Portuguese Word of the Day:', error);
-      return 'Error fetching Portuguese Word of the Day';
+      console.error('Claude API error:', error);
+      new Notice('Failed to fetch words from Claude API');
+      throw error;
     }
   }
 
+  async fetchWordsFromOpenAI(languages) {
+    const prompt = this.buildPrompt(languages);
+    
+    try {
+      const response = await requestUrl({
+        url: 'https://api.openai.com/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.settings.openaiApiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-3.5-turbo',
+          messages: [{
+            role: 'user',
+            content: prompt
+          }],
+          max_tokens: 1000,
+          temperature: 0.7
+        })
+      });
+
+      const responseData = response.json;
+      const content = responseData.choices[0].message.content;
+      
+      // Parse the JSON response
+      const words = JSON.parse(content);
+      return words;
+    } catch (error) {
+      console.error('OpenAI API error:', error);
+      new Notice('Failed to fetch words from OpenAI API');
+      throw error;
+    }
+  }
+
+  async fetchWordsFromGemini(languages) {
+    const prompt = this.buildPrompt(languages);
+    
+    try {
+      const response = await requestUrl({
+        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${this.settings.geminiApiKey}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1000
+          }
+        })
+      });
+
+      const responseData = response.json;
+      const content = responseData.candidates[0].content.parts[0].text;
+      
+      // Parse the JSON response - Gemini sometimes adds markdown formatting
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const words = JSON.parse(jsonMatch[0]);
+        return words;
+      } else {
+        throw new Error('Could not parse Gemini response');
+      }
+    } catch (error) {
+      console.error('Gemini API error:', error);
+      new Notice('Failed to fetch words from Gemini API');
+      throw error;
+    }
+  }
+
+  buildPrompt(languages) {
+    const languageRequests = languages.map(lang => 
+      `- ${lang.name} (${lang.difficulty} level)`
+    ).join('\n');
+
+    return `Generate a word of the day for each of the following languages and difficulty levels:
+${languageRequests}
+
+For each language, provide:
+1. A word appropriate for the specified difficulty level
+2. A clear, concise definition
+3. An example sentence using the word
+
+Difficulty guidelines:
+- Beginner: Common everyday words, simple meanings
+- Intermediate: Less common but useful words, moderate complexity
+- Advanced: Sophisticated vocabulary, nuanced meanings
+- Fluent: Rare, literary, or highly specialized words
+
+Return ONLY a JSON array with this exact structure (no additional text, no markdown formatting):
+[
+  {
+    "language": "Language Name",
+    "word": "the word",
+    "definition": "clear definition",
+    "example": "example sentence using the word"
+  }
+]
+
+Make sure the words are interesting, useful, and appropriate for language learners at the specified level. Vary the types of words (nouns, verbs, adjectives, etc.) for variety.`;
+  }
 
   async appendToDailyNote(file, markdownText) {
     try {
       const content = await this.app.vault.read(file);
-  
-      // Avoid appending duplicate content
-      if (content.includes("# Words of the Day")) {
+      
+      // Avoid duplicate content
+      if (content.includes("> [!QUOTE] Vocabulary")) {
         console.log("Words of the Day already added to the daily note.");
         return;
       }
-  
+      
       const updatedContent = `${content}\n\n${markdownText}`;
       await this.app.vault.modify(file, updatedContent);
+      new Notice('Words of the Day added to daily note');
     } catch (error) {
       console.error("Error appending to daily note:", error);
+      new Notice('Error adding words to daily note');
     }
   }
-  
+
+  async appendWordsToDailyNote(markdownText) {
+    // Get today's daily note
+    const dailyNotesConfig = this.app.internalPlugins.plugins["daily-notes"]?.instance?.options;
+    if (!dailyNotesConfig) {
+      new Notice("Daily Notes plugin is not configured.");
+      return;
+    }
+
+    const dailyNoteFolder = dailyNotesConfig.folder || "Journal";
+    const dateFormat = dailyNotesConfig.format || "YYYY-MM-DD";
+    const today = window.moment().format(dateFormat);
+    const expectedPath = `${dailyNoteFolder}/${today}.md`;
+    
+    let file = this.app.vault.getAbstractFileByPath(expectedPath);
+    
+    if (!file) {
+      // Create the daily note if it doesn't exist
+      try {
+        file = await this.app.vault.create(expectedPath, '');
+      } catch (error) {
+        new Notice('Could not create daily note');
+        return;
+      }
+    }
+    
+    await this.appendToDailyNote(file, markdownText);
+  }
+
   isDailyNoteFile(file) {
     const dailyNotesConfig = this.app.internalPlugins.plugins["daily-notes"]?.instance?.options;
     if (!dailyNotesConfig) {
       console.log("Daily Notes plugin is not enabled or misconfigured.");
       return false;
     }
-  
+
     const dailyNoteFolder = dailyNotesConfig.folder || "Journal";
     const dateFormat = dailyNotesConfig.format || "YYYY-MM-DD";
     const today = window.moment().format(dateFormat);
-  
+
     const expectedPath = `${dailyNoteFolder}/${today}.md`;
     const isDailyNote = file.path === expectedPath;
-  
+
     return isDailyNote;
   }
-  
+}
+
+// Settings Tab
+class WOTDSettingsTab extends PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    containerEl.createEl('h2', { text: 'Word of the Day Settings' });
+
+    // AI Provider Selection
+    new Setting(containerEl)
+      .setName('AI Provider')
+      .setDesc('Select which AI service to use for generating words')
+      .addDropdown(dropdown => dropdown
+        .addOption('claude', 'Claude (Anthropic)')
+        .addOption('openai', 'OpenAI (ChatGPT)')
+        .addOption('gemini', 'Google Gemini')
+        .setValue(this.plugin.settings.provider)
+        .onChange(async (value) => {
+          this.plugin.settings.provider = value;
+          await this.plugin.saveSettings();
+          this.display(); // Refresh to show relevant API key field
+        })
+      );
+
+    // API Key Settings (show only the relevant one)
+    if (this.plugin.settings.provider === 'claude') {
+      new Setting(containerEl)
+        .setName('Claude API Key')
+        .setDesc('Enter your Anthropic Claude API key')
+        .addText(text => text
+          .setPlaceholder('sk-ant-...')
+          .setValue(this.plugin.settings.claudeApiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.claudeApiKey = value;
+            await this.plugin.saveSettings();
+          })
+          .inputEl.type = 'password'
+        );
+    } else if (this.plugin.settings.provider === 'openai') {
+      new Setting(containerEl)
+        .setName('OpenAI API Key')
+        .setDesc('Enter your OpenAI API key')
+        .addText(text => text
+          .setPlaceholder('sk-...')
+          .setValue(this.plugin.settings.openaiApiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.openaiApiKey = value;
+            await this.plugin.saveSettings();
+          })
+          .inputEl.type = 'password'
+        );
+    } else if (this.plugin.settings.provider === 'gemini') {
+      new Setting(containerEl)
+        .setName('Google Gemini API Key')
+        .setDesc('Enter your Google Gemini API key')
+        .addText(text => text
+          .setPlaceholder('AIza...')
+          .setValue(this.plugin.settings.geminiApiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.geminiApiKey = value;
+            await this.plugin.saveSettings();
+          })
+          .inputEl.type = 'password'
+        );
+    }
+
+    // Languages Section
+    containerEl.createEl('h3', { text: 'Languages' });
+    containerEl.createEl('p', { 
+      text: 'Configure the languages you want to learn. You can add, remove, and set difficulty levels.',
+      cls: 'setting-item-description'
+    });
+
+    // Display existing languages
+    this.plugin.settings.languages.forEach((lang, index) => {
+      const langSetting = new Setting(containerEl)
+        .setName(lang.name)
+        .addToggle(toggle => toggle
+          .setValue(lang.enabled)
+          .onChange(async (value) => {
+            this.plugin.settings.languages[index].enabled = value;
+            await this.plugin.saveSettings();
+          })
+        )
+        .addDropdown(dropdown => dropdown
+          .addOption('Beginner', 'Beginner')
+          .addOption('Intermediate', 'Intermediate')
+          .addOption('Advanced', 'Advanced')
+          .addOption('Fluent', 'Fluent')
+          .setValue(lang.difficulty)
+          .onChange(async (value) => {
+            this.plugin.settings.languages[index].difficulty = value;
+            await this.plugin.saveSettings();
+          })
+        )
+        .addButton(button => button
+          .setButtonText('Remove')
+          .onClick(async () => {
+            this.plugin.settings.languages.splice(index, 1);
+            await this.plugin.saveSettings();
+            this.display(); // Refresh the settings display
+          })
+        );
+    });
+
+    // Add new language
+    new Setting(containerEl)
+      .setName('Add Language')
+      .setDesc('Add a new language to learn')
+      .addText(text => {
+        text.setPlaceholder('Language name (e.g., French)');
+        this.newLanguageInput = text;
+      })
+      .addButton(button => button
+        .setButtonText('Add')
+        .onClick(async () => {
+          const languageName = this.newLanguageInput.getValue().trim();
+          if (languageName) {
+            // Check if language already exists
+            const exists = this.plugin.settings.languages.some(
+              lang => lang.name.toLowerCase() === languageName.toLowerCase()
+            );
+            
+            if (exists) {
+              new Notice('This language already exists');
+              return;
+            }
+
+            this.plugin.settings.languages.push({
+              name: languageName,
+              difficulty: 'Intermediate',
+              enabled: true
+            });
+            
+            await this.plugin.saveSettings();
+            this.newLanguageInput.setValue('');
+            this.display(); // Refresh the settings display
+            new Notice(`Added ${languageName}`);
+          }
+        })
+      );
+
+    // Instructions
+    containerEl.createEl('h3', { text: 'Instructions' });
+    const instructionsDiv = containerEl.createDiv('setting-item-description');
+    
+    let apiInstructions = '';
+    switch(this.plugin.settings.provider) {
+      case 'claude':
+        apiInstructions = 'Get your Claude API key from <a href="https://console.anthropic.com/">Anthropic Console</a>';
+        break;
+      case 'openai':
+        apiInstructions = 'Get your OpenAI API key from <a href="https://platform.openai.com/api-keys">OpenAI Platform</a>';
+        break;
+      case 'gemini':
+        apiInstructions = 'Get your Gemini API key from <a href="https://makersuite.google.com/app/apikey">Google AI Studio</a>';
+        break;
+    }
+    
+    instructionsDiv.innerHTML = `
+      <ul>
+        <li>${apiInstructions}</li>
+        <li>Toggle languages on/off using the switches</li>
+        <li>Set appropriate difficulty levels for each language</li>
+        <li>Words will automatically be added to your daily notes</li>
+        <li>Use Command Palette: "Word of the Day: Fetch words for all languages"</li>
+      </ul>
+    `;
+
+    // Model Information
+    containerEl.createEl('h3', { text: 'Model Information' });
+    const modelInfo = containerEl.createDiv('setting-item-description');
+    modelInfo.innerHTML = `
+      <ul>
+        <li><strong>Claude:</strong> Uses Claude 3 Haiku (fast & cost-effective)</li>
+        <li><strong>OpenAI:</strong> Uses GPT-3.5 Turbo (balanced performance)</li>
+        <li><strong>Gemini:</strong> Uses Gemini Pro (Google's latest model)</li>
+      </ul>
+    `;
+  }
 }
