@@ -31,7 +31,7 @@ Generate personalized vocabulary words in any language using AI models (Claude, 
    ```
    <your-vault>/.obsidian/plugins/wotd/
    ```
-2. In Obsidian, open **Settings → Community plugins → Browse** and enable **AI Word of the Day**
+2. In Obsidian, open **Settings → Community plugins → Browse** and enable **Word of the Day**
 3. Configure your API key and languages in the plugin settings
 
 ---
@@ -48,7 +48,7 @@ Choose your preferred AI provider and get an API key:
 
 ### 2. Configure Settings
 
-1. Go to **Settings → AI Word of the Day**
+1. Go to **Settings → Word of the Day**
 2. Select your AI provider from the dropdown
 3. Enter your API key
 4. Add/remove languages as needed
