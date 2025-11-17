@@ -97,9 +97,11 @@ Words are automatically added when you:
 ## Configuration Options
 
 ### AI Provider Settings
-- **Claude (Anthropic)**: Uses Claude 3 Haiku - fast and cost-effective
-- **OpenAI**: Uses GPT-3.5 Turbo - balanced performance
-- **Google Gemini**: Uses Gemini Pro - free tier available
+- **Claude (Anthropic)**: Configurable model selection with automatic model discovery
+- **OpenAI**: Configurable model selection with automatic model discovery
+- **Google Gemini**: Configurable model selection with automatic model discovery
+- **Dynamic Model Discovery**: Click "Refresh Models" to fetch the latest available models from each provider
+- **Temperature Control**: Adjust creativity vs consistency (0.7-1.0) for word generation
 
 ### Language Settings
 - **Add unlimited languages**: Support for any language the AI models can handle
@@ -120,10 +122,13 @@ Words are automatically added when you:
 
 ## Tips
 
-- **Cost optimization**: Claude Haiku and GPT-3.5 Turbo are the most cost-effective options
+- **Model selection**: Use the "Refresh Models" button to discover new models as they're released
+- **Cost optimization**: Smaller models like Claude Haiku and GPT-3.5 Turbo are more cost-effective
 - **Free option**: Google Gemini offers a free tier perfect for personal use
+- **Temperature tuning**: Higher temperature (0.9-1.0) = more creative/varied words, lower (0.7-0.8) = more predictable
 - **Language variety**: Mix different difficulty levels across languages based on your proficiency
 - **Daily practice**: Review previous days' words by searching for "Vocabulary" in your vault
+- **Word history**: The plugin tracks up to 100 words per language (configurable) to avoid repetition
 
 ---
 
@@ -165,6 +170,14 @@ wotd/
 ---
 
 ## Changelog
+
+- **v0.4.0** - Dynamic model selection and prompt improvements
+  - Added dynamic model selection for all providers (Claude, OpenAI, Gemini)
+  - "Refresh Models" button fetches latest available models from each API
+  - Configurable temperature setting (0.7-1.0) for controlling word creativity
+  - Prompt variation system to prevent AI from falling into predictable patterns
+  - Models stay up-to-date without plugin updates
+  - Removed production comments for cleaner codebase
 
 - **v0.3.0** - Word history tracking
   - Added automatic word history tracking per language to avoid repetition

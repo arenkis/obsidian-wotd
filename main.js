@@ -5,9 +5,18 @@ const DEFAULT_SETTINGS = {
   claudeApiKey: '',
   openaiApiKey: '',
   geminiApiKey: '',
+  claudeModel: 'claude-3-haiku-20240307',
+  openaiModel: 'gpt-3.5-turbo',
+  geminiModel: 'gemini-pro',
+  availableModels: {
+    claude: [],
+    openai: [],
+    gemini: []
+  },
   autoAppend: true,
+  temperature: 0.9,
   wordHistoryLimit: 100,
-  wordHistory: {}, // { languageName: ['word1', 'word2', ...] }
+  wordHistory: {},
   languages: [
     { name: 'English', difficulty: 'Fluent', enabled: true },
   ]
@@ -15,13 +24,9 @@ const DEFAULT_SETTINGS = {
 
 module.exports = class WOTDPlugin extends Plugin {
   async onload() {
-    
     await this.loadSettings();
-    
-    // Add settings tab
     this.addSettingTab(new WOTDSettingsTab(this.app, this));
 
-    // Add command for fetching Words of the Day
     this.addCommand({
       id: 'word-of-the-day-fetch',
       name: 'Fetch words for all languages',
@@ -33,11 +38,9 @@ module.exports = class WOTDPlugin extends Plugin {
       }
     });
 
-    // Auto-add to daily notes when files are opened
     this.registerEvent(this.app.workspace.on("file-open", async (file) => {
       if (this.settings.autoAppend && file && this.isDailyNoteFile(file)) {
         const content = await this.app.vault.read(file);
-        // Check if words already exist
         if (!content.includes("> [!QUOTE] Vocabulary")) {
           const markdownText = await this.fetchAllWordsOfTheDay();
           if (markdownText) {
@@ -81,11 +84,9 @@ module.exports = class WOTDPlugin extends Plugin {
       this.settings.wordHistory[language] = [];
     }
 
-    // Add word if it's not already in history
     if (!this.settings.wordHistory[language].includes(word.toLowerCase())) {
       this.settings.wordHistory[language].push(word.toLowerCase());
 
-      // Enforce limit - keep only the most recent N words
       const limit = this.settings.wordHistoryLimit || 100;
       if (this.settings.wordHistory[language].length > limit) {
         this.settings.wordHistory[language] = this.settings.wordHistory[language].slice(-limit);
@@ -98,6 +99,77 @@ module.exports = class WOTDPlugin extends Plugin {
       return [];
     }
     return this.settings.wordHistory[language];
+  }
+
+  async fetchClaudeModels() {
+    try {
+      const response = await requestUrl({
+        url: 'https://api.anthropic.com/v1/models',
+        method: 'GET',
+        headers: {
+          'x-api-key': this.settings.claudeApiKey,
+          'anthropic-version': '2023-06-01'
+        }
+      });
+
+      const models = response.json.data
+        .map(model => model.id)
+        .filter(id => id.includes('claude'));
+
+      this.settings.availableModels.claude = models;
+      await this.saveSettings();
+      return models;
+    } catch (error) {
+      console.error('Failed to fetch Claude models:', error);
+      new Notice('Failed to fetch Claude models. Using default.');
+      return ['claude-3-haiku-20240307', 'claude-3-sonnet-20240229', 'claude-3-opus-20240229'];
+    }
+  }
+
+  async fetchOpenAIModels() {
+    try {
+      const response = await requestUrl({
+        url: 'https://api.openai.com/v1/models',
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.settings.openaiApiKey}`
+        }
+      });
+
+      const models = response.json.data
+        .map(model => model.id)
+        .filter(id => id.includes('gpt'))
+        .sort();
+
+      this.settings.availableModels.openai = models;
+      await this.saveSettings();
+      return models;
+    } catch (error) {
+      console.error('Failed to fetch OpenAI models:', error);
+      new Notice('Failed to fetch OpenAI models. Using default.');
+      return ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo'];
+    }
+  }
+
+  async fetchGeminiModels() {
+    try {
+      const response = await requestUrl({
+        url: `https://generativelanguage.googleapis.com/v1beta/models?key=${this.settings.geminiApiKey}`,
+        method: 'GET'
+      });
+
+      const models = response.json.models
+        .filter(model => model.supportedGenerationMethods?.includes('generateContent'))
+        .map(model => model.name.replace('models/', ''));
+
+      this.settings.availableModels.gemini = models;
+      await this.saveSettings();
+      return models;
+    } catch (error) {
+      console.error('Failed to fetch Gemini models:', error);
+      new Notice('Failed to fetch Gemini models. Using default.');
+      return ['gemini-pro', 'gemini-1.5-pro', 'gemini-1.5-flash'];
+    }
   }
 
   async fetchAllWordsOfTheDay() {
@@ -122,13 +194,11 @@ module.exports = class WOTDPlugin extends Plugin {
         return null;
       }
 
-      // Save words to history
       words.forEach(wordData => {
         this.addWordToHistory(wordData.language, wordData.word);
       });
       await this.saveSettings();
 
-      // Build the markdown
       let markdown = `> [!QUOTE] Vocabulary\n> `;
 
       words.forEach((wordData, index) => {
@@ -176,8 +246,9 @@ module.exports = class WOTDPlugin extends Plugin {
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-3-haiku-20240307',
+          model: this.settings.claudeModel || 'claude-3-haiku-20240307',
           max_tokens: 1000,
+          temperature: this.settings.temperature || 0.9,
           messages: [{
             role: 'user',
             content: prompt
@@ -187,8 +258,6 @@ module.exports = class WOTDPlugin extends Plugin {
 
       const responseData = response.json;
       const content = responseData.content[0].text;
-      
-      // Parse the JSON response
       const words = JSON.parse(content);
       return words;
     } catch (error) {
@@ -210,20 +279,18 @@ module.exports = class WOTDPlugin extends Plugin {
           'Authorization': `Bearer ${this.settings.openaiApiKey}`
         },
         body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
+          model: this.settings.openaiModel || 'gpt-3.5-turbo',
           messages: [{
             role: 'user',
             content: prompt
           }],
           max_tokens: 1000,
-          temperature: 0.7
+          temperature: this.settings.temperature || 0.9
         })
       });
 
       const responseData = response.json;
       const content = responseData.choices[0].message.content;
-      
-      // Parse the JSON response
       const words = JSON.parse(content);
       return words;
     } catch (error) {
@@ -237,8 +304,9 @@ module.exports = class WOTDPlugin extends Plugin {
     const prompt = this.buildPrompt(languages);
     
     try {
+      const model = this.settings.geminiModel || 'gemini-pro';
       const response = await requestUrl({
-        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${this.settings.geminiApiKey}`,
+        url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.settings.geminiApiKey}`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -250,7 +318,7 @@ module.exports = class WOTDPlugin extends Plugin {
             }]
           }],
           generationConfig: {
-            temperature: 0.7,
+            temperature: this.settings.temperature || 0.9,
             maxOutputTokens: 1000
           }
         })
@@ -258,8 +326,6 @@ module.exports = class WOTDPlugin extends Plugin {
 
       const responseData = response.json;
       const content = responseData.candidates[0].content.parts[0].text;
-      
-      // Parse the JSON response - Gemini sometimes adds markdown formatting
       const jsonMatch = content.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         const words = JSON.parse(jsonMatch[0]);
@@ -280,22 +346,44 @@ module.exports = class WOTDPlugin extends Plugin {
       let request = `- ${lang.name} (${lang.difficulty} level)`;
 
       if (history.length > 0) {
-        const recentWords = history.slice(-20).join(', '); // Show last 20 words
+        const recentWords = history.slice(-20).join(', ');
         request += `\n  Previously used words to AVOID: ${recentWords}`;
       }
 
       return request;
     }).join('\n');
 
-    return `Generate a word of the day for each of the following languages and difficulty levels:
+    const variations = [
+      {
+        intro: 'Generate a word of the day for each of the following languages and difficulty levels:',
+        task: 'For each language, provide:\n1. A word appropriate for the specified difficulty level\n2. A clear, concise definition\n3. An example sentence using the word',
+        emphasis: 'IMPORTANT: Do NOT use any of the previously used words listed above. Generate completely new and different words.'
+      },
+      {
+        intro: 'Please provide a vocabulary word for each language below with the specified proficiency level:',
+        task: 'For each language, include:\n1. An appropriate word matching the difficulty level\n2. A concise definition\n3. A practical example sentence',
+        emphasis: 'CRITICAL: Avoid all previously used words mentioned above. Choose fresh, unique vocabulary.'
+      },
+      {
+        intro: 'Create daily vocabulary entries for these languages at the given difficulty levels:',
+        task: 'Each entry should contain:\n1. A word suited to the specified difficulty\n2. A straightforward definition\n3. An illustrative example sentence',
+        emphasis: 'NOTE: The words listed above have been used before. Select completely different vocabulary items.'
+      },
+      {
+        intro: 'Supply a new vocabulary word for each of these language/difficulty combinations:',
+        task: 'Provide for each:\n1. A word matching the difficulty specification\n2. A clear definition\n3. A contextual example sentence',
+        emphasis: 'ESSENTIAL: Do not reuse any words from the previously used list above. Pick entirely new words.'
+      }
+    ];
+
+    const variation = variations[Math.floor(Math.random() * variations.length)];
+
+    return `${variation.intro}
 ${languageRequests}
 
-For each language, provide:
-1. A word appropriate for the specified difficulty level
-2. A clear, concise definition
-3. An example sentence using the word
+${variation.task}
 
-IMPORTANT: Do NOT use any of the previously used words listed above. Generate completely new and different words.
+${variation.emphasis}
 
 Difficulty guidelines:
 - Beginner: Common everyday words, simple meanings
@@ -319,8 +407,6 @@ Make sure the words are interesting, useful, and appropriate for language learne
   async appendToDailyNote(file, markdownText) {
     try {
       const content = await this.app.vault.read(file);
-      
-      // Avoid duplicate content
       if (content.includes("> [!QUOTE] Vocabulary")) {
         return;
       }
@@ -337,7 +423,6 @@ Make sure the words are interesting, useful, and appropriate for language learne
   }
 
   async appendWordsToDailyNote(markdownText) {
-    // Get today's daily note
     const dailyNotesConfig = this.app.internalPlugins.plugins["daily-notes"]?.instance?.options;
     if (!dailyNotesConfig) {
       new Notice("Daily Notes plugin is not configured.");
@@ -350,9 +435,8 @@ Make sure the words are interesting, useful, and appropriate for language learne
     const expectedPath = normalizePath(`${dailyNoteFolder}/${today}.md`);
     
     let file = this.app.vault.getAbstractFileByPath(expectedPath);
-    
+
     if (!file) {
-      // Create the daily note if it doesn't exist
       try {
         file = await this.app.vault.create(expectedPath, '');
       } catch (error) {
@@ -381,7 +465,6 @@ Make sure the words are interesting, useful, and appropriate for language learne
   }
 }
 
-// Settings Tab
 class WOTDSettingsTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -392,19 +475,18 @@ class WOTDSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    // AI Provider Selection
     new Setting(containerEl)
       .setName('AI provider')
       .setDesc('Select which AI service to use for generating words')
       .addDropdown(dropdown => dropdown
         .addOption('claude', 'Claude (Anthropic)')
-        .addOption('openai', 'OpenAI (ChatGPT)')
-        .addOption('gemini', 'Google Gemini')
+        .addOption('openai', 'ChatGPT (OpenAI)')
+        .addOption('gemini', 'Gemini (Google)')
         .setValue(this.plugin.settings.provider)
         .onChange(async (value) => {
           this.plugin.settings.provider = value;
           await this.plugin.saveSettings();
-          this.display(); // Refresh to show relevant API key field
+          this.display();
         })
       );
 
@@ -422,6 +504,31 @@ class WOTDSettingsTab extends PluginSettingTab {
           })
           .inputEl.type = 'password'
         );
+
+      const models = this.plugin.settings.availableModels.claude.length > 0
+        ? this.plugin.settings.availableModels.claude
+        : ['claude-3-haiku-20240307', 'claude-3-sonnet-20240229', 'claude-3-opus-20240229'];
+
+      new Setting(containerEl)
+        .setName('Claude model')
+        .setDesc('Select which Claude model to use')
+        .addDropdown(dropdown => {
+          models.forEach(model => dropdown.addOption(model, model));
+          dropdown.setValue(this.plugin.settings.claudeModel || 'claude-3-haiku-20240307');
+          dropdown.onChange(async (value) => {
+            this.plugin.settings.claudeModel = value;
+            await this.plugin.saveSettings();
+          });
+        })
+        .addButton(button => button
+          .setButtonText('Refresh Models')
+          .onClick(async () => {
+            new Notice('Fetching available Claude models...');
+            await this.plugin.fetchClaudeModels();
+            new Notice('Claude models updated!');
+            this.display();
+          })
+        );
     } else if (this.plugin.settings.provider === 'openai') {
       new Setting(containerEl)
         .setName('OpenAI API key')
@@ -435,6 +542,31 @@ class WOTDSettingsTab extends PluginSettingTab {
           })
           .inputEl.type = 'password'
         );
+
+      const models = this.plugin.settings.availableModels.openai.length > 0
+        ? this.plugin.settings.availableModels.openai
+        : ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo'];
+
+      new Setting(containerEl)
+        .setName('OpenAI model')
+        .setDesc('Select which OpenAI model to use')
+        .addDropdown(dropdown => {
+          models.forEach(model => dropdown.addOption(model, model));
+          dropdown.setValue(this.plugin.settings.openaiModel || 'gpt-3.5-turbo');
+          dropdown.onChange(async (value) => {
+            this.plugin.settings.openaiModel = value;
+            await this.plugin.saveSettings();
+          });
+        })
+        .addButton(button => button
+          .setButtonText('Refresh Models')
+          .onClick(async () => {
+            new Notice('Fetching available OpenAI models...');
+            await this.plugin.fetchOpenAIModels();
+            new Notice('OpenAI models updated!');
+            this.display();
+          })
+        );
     } else if (this.plugin.settings.provider === 'gemini') {
       new Setting(containerEl)
         .setName('Google Gemini API key')
@@ -447,6 +579,31 @@ class WOTDSettingsTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
           .inputEl.type = 'password'
+        );
+
+      const models = this.plugin.settings.availableModels.gemini.length > 0
+        ? this.plugin.settings.availableModels.gemini
+        : ['gemini-pro', 'gemini-1.5-pro', 'gemini-1.5-flash'];
+
+      new Setting(containerEl)
+        .setName('Gemini model')
+        .setDesc('Select which Gemini model to use')
+        .addDropdown(dropdown => {
+          models.forEach(model => dropdown.addOption(model, model));
+          dropdown.setValue(this.plugin.settings.geminiModel || 'gemini-pro');
+          dropdown.onChange(async (value) => {
+            this.plugin.settings.geminiModel = value;
+            await this.plugin.saveSettings();
+          });
+        })
+        .addButton(button => button
+          .setButtonText('Refresh Models')
+          .onClick(async () => {
+            new Notice('Fetching available Gemini models...');
+            await this.plugin.fetchGeminiModels();
+            new Notice('Gemini models updated!');
+            this.display();
+          })
         );
     }
 
@@ -462,7 +619,19 @@ class WOTDSettingsTab extends PluginSettingTab {
         })
       );
 
-    // Word History Limit Setting
+    new Setting(containerEl)
+      .setName('Temperature')
+      .setDesc('Controls creativity vs consistency (0.7-1.0). Higher = more varied/creative words, Lower = more predictable')
+      .addSlider(slider => slider
+        .setLimits(0.7, 1.0, 0.05)
+        .setValue(this.plugin.settings.temperature || 0.9)
+        .setDynamicTooltip()
+        .onChange(async (value) => {
+          this.plugin.settings.temperature = value;
+          await this.plugin.saveSettings();
+        })
+      );
+
     new Setting(containerEl)
       .setName('Word history limit')
       .setDesc('Maximum number of previously used words to track per language (to avoid repetition)')
@@ -478,14 +647,12 @@ class WOTDSettingsTab extends PluginSettingTab {
         })
       );
 
-    // Languages Section
     new Setting(containerEl).setName('Languages').setHeading();
     containerEl.createEl('p', {
       text: 'Configure the languages you want to learn. You can add, remove, and set difficulty levels.',
       cls: 'setting-item-description'
     });
 
-    // Display existing languages
     this.plugin.settings.languages.forEach((lang, index) => {
       const langSetting = new Setting(containerEl)
         .setName(lang.name)
@@ -512,7 +679,7 @@ class WOTDSettingsTab extends PluginSettingTab {
           .onClick(async () => {
             this.plugin.settings.languages.splice(index, 1);
             await this.plugin.saveSettings();
-            this.display(); // Refresh the settings display
+            this.display();
           })
         );
     });
@@ -530,7 +697,6 @@ class WOTDSettingsTab extends PluginSettingTab {
         .onClick(async () => {
           const languageName = this.newLanguageInput.getValue().trim();
           if (languageName) {
-            // Check if language already exists
             const exists = this.plugin.settings.languages.some(
               lang => lang.name.toLowerCase() === languageName.toLowerCase()
             );
@@ -545,16 +711,15 @@ class WOTDSettingsTab extends PluginSettingTab {
               difficulty: 'Intermediate',
               enabled: true
             });
-            
+
             await this.plugin.saveSettings();
             this.newLanguageInput.setValue('');
-            this.display(); // Refresh the settings display
+            this.display();
             new Notice(`Added ${languageName}`);
           }
         })
       );
 
-    // Instructions
     new Setting(containerEl).setName('Instructions').setHeading();
     const instructionsDiv = containerEl.createDiv('setting-item-description');
     const instructionsList = instructionsDiv.createEl('ul');
@@ -587,21 +752,10 @@ class WOTDSettingsTab extends PluginSettingTab {
     instructionsList.createEl('li', { text: 'Words will automatically be added to your daily notes' });
     instructionsList.createEl('li', { text: 'Use Command Palette: "Word of the Day: Fetch words for all languages"' });
 
-    // Model information
     new Setting(containerEl).setName('Model information').setHeading();
     const modelInfo = containerEl.createDiv('setting-item-description');
-    const modelList = modelInfo.createEl('ul');
-
-    const claudeItem = modelList.createEl('li');
-    claudeItem.createEl('strong', { text: 'Claude:' });
-    claudeItem.appendText(' Uses Claude 3 Haiku (fast & cost-effective)');
-
-    const openaiItem = modelList.createEl('li');
-    openaiItem.createEl('strong', { text: 'OpenAI:' });
-    openaiItem.appendText(' Uses GPT-3.5 Turbo (balanced performance)');
-
-    const geminiItem = modelList.createEl('li');
-    geminiItem.createEl('strong', { text: 'Gemini:' });
-    geminiItem.appendText(' Uses Gemini Pro (Google\'s latest model)');
+    modelInfo.createEl('p', {
+      text: 'Model selection is now configurable above for each provider. Use the "Refresh Models" button to fetch the latest available models from each API.'
+    });
   }
 }
