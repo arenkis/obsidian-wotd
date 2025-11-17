@@ -1,4 +1,4 @@
-# AI-Powered Word of the Day
+# Word of the Day
 
 Generate personalized vocabulary words in any language using AI models (Claude, OpenAI, or Google Gemini). Automatically embeds words with definitions and example sentences into your Obsidian daily notes.
 
