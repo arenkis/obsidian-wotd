@@ -1,4 +1,4 @@
-const { Plugin, Notice, PluginSettingTab, Setting, requestUrl } = require('obsidian');
+const { Plugin, Notice, PluginSettingTab, Setting, requestUrl, moment, normalizePath } = require('obsidian');
 
 const DEFAULT_SETTINGS = {
   provider: 'claude',
@@ -31,20 +31,7 @@ module.exports = class WOTDPlugin extends Plugin {
       }
     });
 
-    // Auto-add to daily notes when created
-    this.registerEvent(this.app.vault.on("create", async (file) => {
-      if (this.settings.autoAppend && this.isDailyNoteFile(file)) {
-        // Small delay to ensure file is ready
-        setTimeout(async () => {
-          const markdownText = await this.fetchAllWordsOfTheDay();
-          if (markdownText) {
-            await this.appendToDailyNote(file, markdownText);
-          }
-        }, 100);
-      }
-    }));
-    
-    // Also check when files are opened (for existing daily notes)
+    // Auto-add to daily notes when files are opened
     this.registerEvent(this.app.workspace.on("file-open", async (file) => {
       if (this.settings.autoAppend && file && this.isDailyNoteFile(file)) {
         const content = await this.app.vault.read(file);
@@ -293,7 +280,9 @@ Make sure the words are interesting, useful, and appropriate for language learne
       }
       
       const updatedContent = `${content}\n\n${markdownText}`;
-      await this.app.vault.modify(file, updatedContent);
+      await this.app.vault.process(file, (data) => {
+        return updatedContent;
+      });
       new Notice('Words of the Day added to daily note');
     } catch (error) {
       console.error("Error appending to daily note:", error);
@@ -311,8 +300,8 @@ Make sure the words are interesting, useful, and appropriate for language learne
 
     const dailyNoteFolder = dailyNotesConfig.folder || "Journal";
     const dateFormat = dailyNotesConfig.format || "YYYY-MM-DD";
-    const today = window.moment().format(dateFormat);
-    const expectedPath = `${dailyNoteFolder}/${today}.md`;
+    const today = moment().format(dateFormat);
+    const expectedPath = normalizePath(`${dailyNoteFolder}/${today}.md`);
     
     let file = this.app.vault.getAbstractFileByPath(expectedPath);
     
@@ -337,9 +326,9 @@ Make sure the words are interesting, useful, and appropriate for language learne
 
     const dailyNoteFolder = dailyNotesConfig.folder || "Journal";
     const dateFormat = dailyNotesConfig.format || "YYYY-MM-DD";
-    const today = window.moment().format(dateFormat);
+    const today = moment().format(dateFormat);
 
-    const expectedPath = `${dailyNoteFolder}/${today}.md`;
+    const expectedPath = normalizePath(`${dailyNoteFolder}/${today}.md`);
     const isDailyNote = file.path === expectedPath;
 
     return isDailyNote;
@@ -506,20 +495,6 @@ class WOTDSettingsTab extends PluginSettingTab {
     // Instructions
     new Setting(containerEl).setName('Instructions').setHeading();
     const instructionsDiv = containerEl.createDiv('setting-item-description');
-    
-    let apiInstructions = '';
-    switch(this.plugin.settings.provider) {
-      case 'claude':
-        apiInstructions = 'Get your Claude API key from <a href="https://console.anthropic.com/">Anthropic Console</a>';
-        break;
-      case 'openai':
-        apiInstructions = 'Get your OpenAI API key from <a href="https://platform.openai.com/api-keys">OpenAI Platform</a>';
-        break;
-      case 'gemini':
-        apiInstructions = 'Get your Gemini API key from <a href="https://makersuite.google.com/app/apikey">Google AI Studio</a>';
-        break;
-    }
-    
     const instructionsList = instructionsDiv.createEl('ul');
 
     const apiInstructionItem = instructionsList.createEl('li');

@@ -59,7 +59,6 @@ Choose your preferred AI provider and get an API key:
 
 ### Automatic Mode
 Words are automatically added when you:
-- Create a new daily note
 - Open today's daily note (if words haven't been added yet)
 
 ### Manual Mode
@@ -159,6 +158,13 @@ wotd/
 ---
 
 ## Changelog
+
+- **v0.2.3** - Bug fixes and improvements
+  - Changed to use `Vault.process` instead of `Vault.modify` for better performance
+  - Import `moment` from Obsidian instead of using `window.moment`
+  - Use `normalizePath` to properly handle user-defined paths
+  - Removed redundant `create` event listener (only `file-open` is needed)
+  - Cleaned up unused code
 
 - **v2.0.0** - Complete rewrite with AI integration
   - Added support for Claude, OpenAI, and Google Gemini
