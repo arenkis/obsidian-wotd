@@ -210,6 +210,7 @@ wotd/
 - No data is sent to any servers except the chosen AI provider
 - All API calls are made directly from your device
 - Consider API costs when configuring multiple languages
+- **Note**: Google Gemini API requires the API key to be passed as a URL parameter (this is a limitation of Gemini's API design). Claude and OpenAI pass API keys securely in headers.
 
 ---
 

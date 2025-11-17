@@ -26,6 +26,7 @@ module.exports = class WOTDPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new WOTDSettingsTab(this.app, this));
+    this._fetchingWords = false;
 
     this.addCommand({
       id: 'word-of-the-day-fetch',
@@ -40,11 +41,20 @@ module.exports = class WOTDPlugin extends Plugin {
 
     this.registerEvent(this.app.workspace.on("file-open", async (file) => {
       if (this.settings.autoAppend && file && this.isDailyNoteFile(file)) {
+        if (this._fetchingWords) {
+          return;
+        }
+
         const content = await this.app.vault.read(file);
         if (!content.includes("> [!QUOTE] Vocabulary")) {
-          const markdownText = await this.fetchAllWordsOfTheDay();
-          if (markdownText) {
-            await this.appendToDailyNote(file, markdownText);
+          this._fetchingWords = true;
+          try {
+            const markdownText = await this.fetchAllWordsOfTheDay();
+            if (markdownText) {
+              await this.appendToDailyNote(file, markdownText);
+            }
+          } finally {
+            this._fetchingWords = false;
           }
         }
       }
@@ -235,7 +245,7 @@ module.exports = class WOTDPlugin extends Plugin {
 
   async fetchWordsFromClaude(languages) {
     const prompt = this.buildPrompt(languages);
-    
+
     try {
       const response = await requestUrl({
         url: 'https://api.anthropic.com/v1/messages',
@@ -257,19 +267,36 @@ module.exports = class WOTDPlugin extends Plugin {
       });
 
       const responseData = response.json;
-      const content = responseData.content[0].text;
-      const words = JSON.parse(content);
+      const content = responseData?.content?.[0]?.text;
+
+      if (!content) {
+        throw new Error('Invalid API response structure from Claude');
+      }
+
+      let words;
+      try {
+        words = JSON.parse(content);
+      } catch (parseError) {
+        console.error('Failed to parse Claude response as JSON:', parseError);
+        console.error('Response content:', content);
+        throw new Error('Received invalid JSON from Claude API');
+      }
+
+      if (!Array.isArray(words)) {
+        throw new Error('Claude API response is not an array');
+      }
+
       return words;
     } catch (error) {
       console.error('Claude API error:', error);
-      new Notice('Failed to fetch words from Claude API');
+      new Notice('Failed to fetch words from Claude API. Please try again.');
       throw error;
     }
   }
 
   async fetchWordsFromOpenAI(languages) {
     const prompt = this.buildPrompt(languages);
-    
+
     try {
       const response = await requestUrl({
         url: 'https://api.openai.com/v1/chat/completions',
@@ -290,19 +317,36 @@ module.exports = class WOTDPlugin extends Plugin {
       });
 
       const responseData = response.json;
-      const content = responseData.choices[0].message.content;
-      const words = JSON.parse(content);
+      const content = responseData?.choices?.[0]?.message?.content;
+
+      if (!content) {
+        throw new Error('Invalid API response structure from OpenAI');
+      }
+
+      let words;
+      try {
+        words = JSON.parse(content);
+      } catch (parseError) {
+        console.error('Failed to parse OpenAI response as JSON:', parseError);
+        console.error('Response content:', content);
+        throw new Error('Received invalid JSON from OpenAI API');
+      }
+
+      if (!Array.isArray(words)) {
+        throw new Error('OpenAI API response is not an array');
+      }
+
       return words;
     } catch (error) {
       console.error('OpenAI API error:', error);
-      new Notice('Failed to fetch words from OpenAI API');
+      new Notice('Failed to fetch words from OpenAI API. Please try again.');
       throw error;
     }
   }
 
   async fetchWordsFromGemini(languages) {
     const prompt = this.buildPrompt(languages);
-    
+
     try {
       const model = this.settings.geminiModel || 'gemini-pro';
       const response = await requestUrl({
@@ -325,17 +369,35 @@ module.exports = class WOTDPlugin extends Plugin {
       });
 
       const responseData = response.json;
-      const content = responseData.candidates[0].content.parts[0].text;
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        const words = JSON.parse(jsonMatch[0]);
-        return words;
-      } else {
-        throw new Error('Could not parse Gemini response');
+      const content = responseData?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!content) {
+        throw new Error('Invalid API response structure from Gemini');
       }
+
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) {
+        console.error('No JSON array found in Gemini response:', content);
+        throw new Error('Could not find JSON array in Gemini response');
+      }
+
+      let words;
+      try {
+        words = JSON.parse(jsonMatch[0]);
+      } catch (parseError) {
+        console.error('Failed to parse Gemini response as JSON:', parseError);
+        console.error('Matched content:', jsonMatch[0]);
+        throw new Error('Received invalid JSON from Gemini API');
+      }
+
+      if (!Array.isArray(words)) {
+        throw new Error('Gemini API response is not an array');
+      }
+
+      return words;
     } catch (error) {
       console.error('Gemini API error:', error);
-      new Notice('Failed to fetch words from Gemini API');
+      new Notice('Failed to fetch words from Gemini API. Please try again.');
       throw error;
     }
   }
@@ -490,7 +552,6 @@ class WOTDSettingsTab extends PluginSettingTab {
         })
       );
 
-    // API Key Settings (show only the relevant one)
     if (this.plugin.settings.provider === 'claude') {
       new Setting(containerEl)
         .setName('Claude API key')
@@ -522,11 +583,18 @@ class WOTDSettingsTab extends PluginSettingTab {
         })
         .addButton(button => button
           .setButtonText('Refresh Models')
+          .setDisabled(false)
           .onClick(async () => {
-            new Notice('Fetching available Claude models...');
-            await this.plugin.fetchClaudeModels();
-            new Notice('Claude models updated!');
-            this.display();
+            button.setDisabled(true);
+            button.setButtonText('Fetching...');
+            try {
+              await this.plugin.fetchClaudeModels();
+              new Notice('Claude models updated!');
+              this.display();
+            } catch (error) {
+              button.setDisabled(false);
+              button.setButtonText('Refresh Models');
+            }
           })
         );
     } else if (this.plugin.settings.provider === 'openai') {
@@ -560,11 +628,18 @@ class WOTDSettingsTab extends PluginSettingTab {
         })
         .addButton(button => button
           .setButtonText('Refresh Models')
+          .setDisabled(false)
           .onClick(async () => {
-            new Notice('Fetching available OpenAI models...');
-            await this.plugin.fetchOpenAIModels();
-            new Notice('OpenAI models updated!');
-            this.display();
+            button.setDisabled(true);
+            button.setButtonText('Fetching...');
+            try {
+              await this.plugin.fetchOpenAIModels();
+              new Notice('OpenAI models updated!');
+              this.display();
+            } catch (error) {
+              button.setDisabled(false);
+              button.setButtonText('Refresh Models');
+            }
           })
         );
     } else if (this.plugin.settings.provider === 'gemini') {
@@ -598,16 +673,22 @@ class WOTDSettingsTab extends PluginSettingTab {
         })
         .addButton(button => button
           .setButtonText('Refresh Models')
+          .setDisabled(false)
           .onClick(async () => {
-            new Notice('Fetching available Gemini models...');
-            await this.plugin.fetchGeminiModels();
-            new Notice('Gemini models updated!');
-            this.display();
+            button.setDisabled(true);
+            button.setButtonText('Fetching...');
+            try {
+              await this.plugin.fetchGeminiModels();
+              new Notice('Gemini models updated!');
+              this.display();
+            } catch (error) {
+              button.setDisabled(false);
+              button.setButtonText('Refresh Models');
+            }
           })
         );
     }
 
-    // Auto-append Setting
     new Setting(containerEl)
       .setName('Auto-append to daily notes')
       .setDesc('Automatically add words of the day to daily notes when they are created or opened')
@@ -684,7 +765,6 @@ class WOTDSettingsTab extends PluginSettingTab {
         );
     });
 
-    // Add new language
     new Setting(containerEl)
       .setName('Add language')
       .setDesc('Add a new language to learn')
