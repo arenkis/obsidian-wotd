@@ -6,6 +6,8 @@ const DEFAULT_SETTINGS = {
   openaiApiKey: '',
   geminiApiKey: '',
   autoAppend: true,
+  wordHistoryLimit: 100,
+  wordHistory: {}, // { languageName: ['word1', 'word2', ...] }
   languages: [
     { name: 'English', difficulty: 'Fluent', enabled: true },
   ]
@@ -70,6 +72,34 @@ module.exports = class WOTDPlugin extends Plugin {
     }
   }
 
+  addWordToHistory(language, word) {
+    if (!this.settings.wordHistory) {
+      this.settings.wordHistory = {};
+    }
+
+    if (!this.settings.wordHistory[language]) {
+      this.settings.wordHistory[language] = [];
+    }
+
+    // Add word if it's not already in history
+    if (!this.settings.wordHistory[language].includes(word.toLowerCase())) {
+      this.settings.wordHistory[language].push(word.toLowerCase());
+
+      // Enforce limit - keep only the most recent N words
+      const limit = this.settings.wordHistoryLimit || 100;
+      if (this.settings.wordHistory[language].length > limit) {
+        this.settings.wordHistory[language] = this.settings.wordHistory[language].slice(-limit);
+      }
+    }
+  }
+
+  getWordHistory(language) {
+    if (!this.settings.wordHistory || !this.settings.wordHistory[language]) {
+      return [];
+    }
+    return this.settings.wordHistory[language];
+  }
+
   async fetchAllWordsOfTheDay() {
     const apiKey = this.getActiveApiKey();
     
@@ -87,20 +117,26 @@ module.exports = class WOTDPlugin extends Plugin {
 
     try {
       const words = await this.fetchWordsFromAI(enabledLanguages);
-      
+
       if (!words || words.length === 0) {
         return null;
       }
 
+      // Save words to history
+      words.forEach(wordData => {
+        this.addWordToHistory(wordData.language, wordData.word);
+      });
+      await this.saveSettings();
+
       // Build the markdown
       let markdown = `> [!QUOTE] Vocabulary\n> `;
-      
+
       words.forEach((wordData, index) => {
         markdown += `\n> **${wordData.language}:**\n`;
         markdown += `> **${wordData.word}**\n> \n`;
         markdown += `> *Definition:* ${wordData.definition}\n> \n`;
         markdown += `> *Example:* ${wordData.example}`;
-        
+
         if (index < words.length - 1) {
           markdown += '\n> ';
         }
@@ -239,9 +275,17 @@ module.exports = class WOTDPlugin extends Plugin {
   }
 
   buildPrompt(languages) {
-    const languageRequests = languages.map(lang => 
-      `- ${lang.name} (${lang.difficulty} level)`
-    ).join('\n');
+    const languageRequests = languages.map(lang => {
+      const history = this.getWordHistory(lang.name);
+      let request = `- ${lang.name} (${lang.difficulty} level)`;
+
+      if (history.length > 0) {
+        const recentWords = history.slice(-20).join(', '); // Show last 20 words
+        request += `\n  Previously used words to AVOID: ${recentWords}`;
+      }
+
+      return request;
+    }).join('\n');
 
     return `Generate a word of the day for each of the following languages and difficulty levels:
 ${languageRequests}
@@ -250,6 +294,8 @@ For each language, provide:
 1. A word appropriate for the specified difficulty level
 2. A clear, concise definition
 3. An example sentence using the word
+
+IMPORTANT: Do NOT use any of the previously used words listed above. Generate completely new and different words.
 
 Difficulty guidelines:
 - Beginner: Common everyday words, simple meanings
@@ -413,6 +459,22 @@ class WOTDSettingsTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.settings.autoAppend = value;
           await this.plugin.saveSettings();
+        })
+      );
+
+    // Word History Limit Setting
+    new Setting(containerEl)
+      .setName('Word history limit')
+      .setDesc('Maximum number of previously used words to track per language (to avoid repetition)')
+      .addText(text => text
+        .setPlaceholder('100')
+        .setValue(String(this.plugin.settings.wordHistoryLimit || 100))
+        .onChange(async (value) => {
+          const numValue = parseInt(value);
+          if (!isNaN(numValue) && numValue > 0) {
+            this.plugin.settings.wordHistoryLimit = numValue;
+            await this.plugin.saveSettings();
+          }
         })
       );
 

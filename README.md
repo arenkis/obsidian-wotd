@@ -9,6 +9,7 @@ Generate personalized vocabulary words in any language using AI models (Claude, 
 - **Multi-language support:** Add unlimited languages with customizable difficulty levels (Beginner, Intermediate, Advanced, Fluent)
 - **Multiple AI providers:** Choose between Claude (Anthropic), OpenAI (ChatGPT), or Google Gemini
 - **Smart difficulty scaling:** Get words appropriate to your proficiency level in each language
+- **Word history tracking:** Automatically tracks previously used words and avoids repetition (configurable limit per language)
 - **Auto-append:** Automatically adds vocabulary to new daily notes
 - **Manual command:** Fetch words on-demand via Command Palette
 - **Clean formatting:** Outputs in beautiful Obsidian callout blocks with definitions and example sentences
@@ -102,12 +103,18 @@ Words are automatically added when you:
 
 ### Language Settings
 - **Add unlimited languages**: Support for any language the AI models can handle
-- **Difficulty levels**: 
+- **Difficulty levels**:
   - *Beginner*: Common everyday words, simple meanings
   - *Intermediate*: Less common but useful words, moderate complexity
   - *Advanced*: Sophisticated vocabulary, nuanced meanings
   - *Fluent*: Rare, literary, or highly specialized words
 - **Toggle on/off**: Temporarily disable languages without removing them
+
+### Word History
+- **Automatic tracking**: Stores previously used words per language to avoid repetition
+- **Configurable limit**: Set how many words to track (default: 100 per language)
+- **Smart exclusion**: The AI is instructed to avoid your last 20 used words when generating new ones
+- **Persistent storage**: Word history is saved in plugin settings and persists across sessions
 
 ---
 
@@ -158,6 +165,12 @@ wotd/
 ---
 
 ## Changelog
+
+- **v0.3.0** - Word history tracking
+  - Added automatic word history tracking per language to avoid repetition
+  - Configurable word history limit (default: 100 words per language)
+  - AI is now instructed to avoid recently used words when generating new ones
+  - Word history persists in plugin settings across sessions
 
 - **v0.2.3** - Bug fixes and improvements
   - Changed to use `Vault.process` instead of `Vault.modify` for better performance
