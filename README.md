@@ -171,6 +171,14 @@ wotd/
 
 ## Changelog
 
+- **v0.4.1** - Validation and error handling improvements
+  - Added robust JSON parsing validation for all AI providers
+  - Added API response structure validation with optional chaining
+  - Added debouncing to prevent race conditions in auto-append
+  - Added loading states for "Refresh Models" buttons
+  - Enhanced error logging and user-friendly error messages
+  - Documented Gemini API key URL limitation
+
 - **v0.4.0** - Dynamic model selection and prompt improvements
   - Added dynamic model selection for all providers (Claude, OpenAI, Gemini)
   - "Refresh Models" button fetches latest available models from each API
